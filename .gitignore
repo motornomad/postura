@@ -32,9 +32,11 @@ ENV/
 IMPLEMENTATION_CONTEXT.md
 POSTURA_ARCHITECTURE.md
 TODO.md
+AGENT_HANDOFF.md
 test.md
 docs/CODEBASE_TEST_PLAN.md
 docs/TEST_PLAN_RESULTS.md
+docs/BLOG_POST.md
 
 # Knowledge store (generated, large binary embeddings)
 knowledge_store/
