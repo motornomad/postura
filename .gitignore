@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursor/
+
+# Environment / secrets
+.env
+.env.local
+.env.production
+
+# Internal planning docs (not for public repo)
+IMPLEMENTATION_CONTEXT.md
+POSTURA_ARCHITECTURE.md
+TODO.md
+test.md
+docs/CODEBASE_TEST_PLAN.md
+docs/TEST_PLAN_RESULTS.md
+
+# Knowledge store (generated, large binary embeddings)
+knowledge_store/
+
+# Knowledge data downloads (large XML/JSON, re-downloadable)
+knowledge_data/cwe/*.xml
+knowledge_data/cwe/*.zip
+knowledge_data/cve/*.json
+knowledge_data/owasp/*.html
+
+# Neo4j local data
+neo4j_data/
+neo4j_logs/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Temp / cloned repos for analysis
+postura_repos/
+/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/

@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POSTURA — Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --border: #2a2a3a;
+  --border-accent: #3a3a5a;
+  --text: #e0e0e8;
+  --text-dim: #8888a0;
+  --text-bright: #ffffff;
+  --blue: #4a9eff;
+  --cyan: #00d4aa;
+  --purple: #a855f7;
+  --orange: #ff8c42;
+  --red: #ff4d6a;
+  --yellow: #ffd23f;
+  --green: #22c55e;
+  --pink: #f472b6;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  padding: 40px 24px;
+}
+
+.container { max-width: 1300px; margin: 0 auto; }
+
+h1 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-bright);
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 36px;
+}
+
+.subtitle span { color: var(--cyan); font-weight: 500; }
+
+/* ── Trigger row ── */
+.trigger-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.tbox {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tbox .icon { font-size: 24px; }
+
+.tbox .label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.tbox .desc {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.harrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.harrow .aline {
+  width: 50px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--blue), var(--cyan));
+  position: relative;
+}
+
+.harrow .aline::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  top: -4px;
+  border: 5px solid transparent;
+  border-left: 6px solid var(--cyan);
+}
+
+.harrow .alabel {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  color: var(--cyan);
+  letter-spacing: 0.5px;
+}
+
+/* ── System boundary ── */
+.system {
+  border: 2px solid var(--border-accent);
+  border-radius: 14px;
+  padding: 28px;
+  position: relative;
+  background: linear-gradient(180deg, rgba(18,18,26,0.8), rgba(10,10,15,0.95));
+}
+
+.sys-label {
+  position: absolute;
+  top: -11px;
+  left: 28px;
+  background: var(--bg);
+  padding: 0 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--purple);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* ── Section labels ── */
+.slabel {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  margin: 6px 0 10px;
+}
+
+/* ── Pipeline ── */
+.pipeline { display: flex; flex-direction: column; gap: 16px; }
+
+.row { display: flex; gap: 14px; }
+
+/* ── Block ── */
+.block {
+  border-radius: 10px;
+  padding: 16px 18px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.block:hover { transform: translateY(-2px); }
+
+.bhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.bnum {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.btitle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.bdesc {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin-bottom: 8px;
+}
+
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+
+.bout {
+  margin-top: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--text-dim);
+  opacity: 0.65;
+}
+
+/* ── Color variants ── */
+.b-blue { background: linear-gradient(135deg, rgba(74,158,255,0.07), rgba(74,158,255,0.02)); border: 1px solid rgba(74,158,255,0.22); }
+.b-blue:hover { box-shadow: 0 4px 18px rgba(74,158,255,0.12); }
+.b-blue .bnum { background: rgba(74,158,255,0.18); color: var(--blue); }
+.b-blue .tag { border-color: rgba(74,158,255,0.15); color: var(--blue); }
+
+.b-cyan { background: linear-gradient(135deg, rgba(0,212,170,0.07), rgba(0,212,170,0.02)); border: 1px solid rgba(0,212,170,0.22); }
+.b-cyan:hover { box-shadow: 0 4px 18px rgba(0,212,170,0.12); }
+.b-cyan .bnum { background: rgba(0,212,170,0.18); color: var(--cyan); }
+.b-cyan .tag { border-color: rgba(0,212,170,0.15); color: var(--cyan); }
+
+.b-purple { background: linear-gradient(135deg, rgba(168,85,247,0.07), rgba(168,85,247,0.02)); border: 1px solid rgba(168,85,247,0.22); }
+.b-purple:hover { box-shadow: 0 4px 18px rgba(168,85,247,0.12); }
+.b-purple .bnum { background: rgba(168,85,247,0.18); color: var(--purple); }
+.b-purple .tag { border-color: rgba(168,85,247,0.15); color: var(--purple); }
+
+.b-orange { background: linear-gradient(135deg, rgba(255,140,66,0.07), rgba(255,140,66,0.02)); border: 1px solid rgba(255,140,66,0.22); }
+.b-orange:hover { box-shadow: 0 4px 18px rgba(255,140,66,0.12); }
+.b-orange .bnum { background: rgba(255,140,66,0.18); color: var(--orange); }
+.b-orange .tag { border-color: rgba(255,140,66,0.15); color: var(--orange); }
+
+.b-yellow { background: linear-gradient(135deg, rgba(255,210,63,0.07), rgba(255,210,63,0.02)); border: 1px solid rgba(255,210,63,0.22); }
+.b-yellow:hover { box-shadow: 0 4px 18px rgba(255,210,63,0.12); }
+.b-yellow .bnum { background: rgba(255,210,63,0.18); color: var(--yellow); }
+.b-yellow .tag { border-color: rgba(255,210,63,0.15); color: var(--yellow); }
+
+.b-green { background: linear-gradient(135deg, rgba(34,197,94,0.07), rgba(34,197,94,0.02)); border: 1px solid rgba(34,197,94,0.22); }
+.b-green:hover { box-shadow: 0 4px 18px rgba(34,197,94,0.12); }
+.b-green .bnum { background: rgba(34,197,94,0.18); color: var(--green); }
+.b-green .tag { border-color: rgba(34,197,94,0.15); color: var(--green); }
+
+.b-pink { background: linear-gradient(135deg, rgba(244,114,182,0.07), rgba(244,114,182,0.02)); border: 1px solid rgba(244,114,182,0.22); }
+.b-pink:hover { box-shadow: 0 4px 18px rgba(244,114,182,0.12); }
+.b-pink .bnum { background: rgba(244,114,182,0.18); color: var(--pink); }
+.b-pink .tag { border-color: rgba(244,114,182,0.15); color: var(--pink); }
+
+.b-red { background: linear-gradient(135deg, rgba(255,77,106,0.07), rgba(255,77,106,0.02)); border: 1px solid rgba(255,77,106,0.22); }
+.b-red:hover { box-shadow: 0 4px 18px rgba(255,77,106,0.12); }
+.b-red .bnum { background: rgba(255,77,106,0.18); color: var(--red); }
+.b-red .tag { border-color: rgba(255,77,106,0.15); color: var(--red); }
+
+/* ── Vertical connector ── */
+.vconn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 0;
+  position: relative;
+}
+
+.vconn::before {
+  content: '';
+  width: 2px;
+  height: 18px;
+  background: linear-gradient(180deg, rgba(168,85,247,0.3), rgba(0,212,170,0.3));
+}
+
+.vconn .vlabel {
+  position: absolute;
+  left: calc(50% + 16px);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  opacity: 0.55;
+}
+
+/* ── Data stores ── */
+.stores { display: flex; gap: 12px; margin-top: 22px; flex-wrap: wrap; }
+
+.store {
+  flex: 1;
+  min-width: 140px;
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.store .sicon { font-size: 22px; margin-bottom: 4px; }
+
+.store .sname {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.store .sdesc {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.st-neo4j { background: rgba(0,212,170,0.04); border: 1px dashed rgba(0,212,170,0.25); }
+.st-redis { background: rgba(255,77,106,0.04); border: 1px dashed rgba(255,77,106,0.25); }
+.st-chroma { background: rgba(255,210,63,0.04); border: 1px dashed rgba(255,210,63,0.25); }
+.st-llm { background: rgba(168,85,247,0.04); border: 1px dashed rgba(168,85,247,0.25); }
+
+/* ── Outputs ── */
+.outputs { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
+
+.obox {
+  flex: 1;
+  min-width: 120px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.obox .oicon { font-size: 20px; margin-bottom: 4px; }
+
+.obox .otitle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.obox .odesc {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+/* ── Tool grid ── */
+.tools-grid { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+.tool-card {
+  background: rgba(255,140,66,0.06);
+  border: 1px solid rgba(255,140,66,0.13);
+  border-radius: 6px;
+  padding: 6px 9px;
+  flex: 1;
+  min-width: 120px;
+}
+
+.tool-card .tname {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--orange);
+}
+
+.tool-card .tdesc {
+  font-size: 8.5px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+
+/* ── Sub columns inside a block ── */
+.subcols { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+
+.subcol { flex: 1; min-width: 130px; }
+
+.subcol-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  margin-bottom: 4px;
+}
+
+.subcol-text {
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+/* ── Insight box ── */
+.insight {
+  margin-top: 32px;
+  padding: 22px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(168,85,247,0.05), rgba(0,212,170,0.05));
+  border: 1px solid var(--border-accent);
+}
+
+.insight-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--purple);
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+.insight-cols { display: flex; gap: 20px; flex-wrap: wrap; }
+
+.insight-col {
+  flex: 1;
+  min-width: 200px;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.insight-footer {
+  margin-top: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+/* ── Sizing ── */
+.w1 { flex: 1; }
+.w2 { flex: 2; }
+
+@media (max-width: 900px) {
+  .row { flex-direction: column; }
+  .stores { flex-direction: column; }
+  .outputs { flex-direction: column; }
+  .trigger-row { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>POSTURA</h1>
+  <div class="subtitle">Agentic Attack Surface Intelligence — <span>self-hosted service, not a library</span></div>
+
+  <!-- ════ TRIGGERS ════ -->
+  <div class="slabel">External Trigger</div>
+  <div class="trigger-row">
+    <div class="tbox">
+      <div class="icon">&#128736;</div>
+      <div>
+        <div class="label">Developer pushes code</div>
+        <div class="desc">git push / PR opened / deps updated</div>
+      </div>
+    </div>
+    <div class="harrow">
+      <div class="alabel">WEBHOOK</div>
+      <div class="aline"></div>
+    </div>
+    <div class="tbox">
+      <div class="icon">&#9881;&#65039;</div>
+      <div>
+        <div class="label">GitHub sends POST</div>
+        <div class="desc">push / pull_request → /webhook/github</div>
+      </div>
+    </div>
+    <div class="harrow">
+      <div class="alabel">ENQUEUE</div>
+      <div class="aline"></div>
+    </div>
+    <div class="tbox" style="border-color:rgba(255,77,106,0.25);">
+      <div class="icon">&#128203;</div>
+      <div>
+        <div class="label">Celery task queued</div>
+        <div class="desc">analyze_commit(repo, sha, files) → Redis</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ SYSTEM BOUNDARY ════ -->
+  <div class="system">
+    <div class="sys-label">POSTURA Service (docker compose up)</div>
+
+    <div class="pipeline">
+
+      <!-- ── STEP 1: Webhook + Ingest ── -->
+      <div class="slabel" style="margin-top:0">Step 1 — Receive &amp; Parse (changed files only)</div>
+      <div class="row">
+        <div class="block b-blue w1">
+          <div class="bhead">
+            <div class="bnum">1</div>
+            <div class="btitle">Webhook Layer</div>
+          </div>
+          <div class="bdesc">
+            Receives GitHub events, verifies HMAC signature, classifies event type (push / PR / dep update), computes the <strong>minimal change scope</strong>.
+          </div>
+          <div class="tags">
+            <span class="tag">receiver.py</span>
+            <span class="tag">event_router.py</span>
+            <span class="tag">scope_analyzer.py</span>
+            <span class="tag">repo_manager.py</span>
+          </div>
+          <div class="bout">→ ChangeScope: changed files, affected modules, transitive dependents</div>
+        </div>
+
+        <div class="block b-cyan w2">
+          <div class="bhead">
+            <div class="bnum">2</div>
+            <div class="btitle">Ingest Layer</div>
+          </div>
+          <div class="bdesc">
+            Parses <strong>only changed files</strong>. Extracts code structure, runs static analysis tools, scans dependencies. Collects data — does not reason.
+          </div>
+          <div class="subcols">
+            <div class="subcol">
+              <div class="subcol-title" style="color:var(--cyan);">EXTRACTS:</div>
+              <div class="subcol-text">Functions, classes, call graph, imports, HTTP endpoints, auth decorators, data store access, SQL read/write, PII heuristics</div>
+            </div>
+            <div class="subcol">
+              <div class="subcol-title" style="color:var(--cyan);">RUNS:</div>
+              <div class="subcol-text">Semgrep (SAST), Bandit (SAST), pip-audit (CVEs), config scan (secrets, CORS, debug flags)</div>
+            </div>
+          </div>
+          <div class="tags" style="margin-top:8px;">
+            <span class="tag">ast_parser.py</span>
+            <span class="tag">endpoint_extractor.py</span>
+            <span class="tag">sast_runner.py</span>
+            <span class="tag">dep_scanner.py</span>
+            <span class="tag">config_analyzer.py</span>
+          </div>
+          <div class="bout">→ StructuredIngestResult: AST nodes, call edges, endpoints, findings, dep vulns, data accesses, file imports</div>
+        </div>
+      </div>
+
+      <!-- connector -->
+      <div class="vconn"><span class="vlabel">StructuredIngestResult flows down</span></div>
+
+      <!-- ── STEP 2: Graph Engine ── -->
+      <div class="slabel">Step 2 — Build &amp; Update the Threat Graph</div>
+      <div class="row">
+        <div class="block b-purple w1">
+          <div class="bhead">
+            <div class="bnum">3</div>
+            <div class="btitle">Graph Engine</div>
+          </div>
+          <div class="bdesc">
+            Maintains the <strong>persistent threat graph</strong> in Neo4j. On each commit: identifies the affected subgraph, soft-deletes stale nodes, rebuilds from fresh ingest, computes a diff. The graph is the living map of your attack surface.
+          </div>
+          <div class="subcols">
+            <div class="subcol">
+              <div class="subcol-title" style="color:var(--purple);">7 NODE TYPES</div>
+              <div class="subcol-text">:Service &nbsp;:Endpoint &nbsp;:Function &nbsp;:DataStore &nbsp;:Dependency &nbsp;:Finding &nbsp;:TrustZone</div>
+            </div>
+            <div class="subcol">
+              <div class="subcol-title" style="color:var(--purple);">10 EDGE TYPES</div>
+              <div class="subcol-text">:CALLS &nbsp;:HANDLED_BY &nbsp;:BELONGS_TO &nbsp;:IN_ZONE &nbsp;:READS_FROM &nbsp;:WRITES_TO &nbsp;:USES &nbsp;:AFFECTS &nbsp;:TRUSTS &nbsp;<strong style="color:var(--purple);">:CHAINS_TO</strong></div>
+            </div>
+            <div class="subcol">
+              <div class="subcol-title" style="color:var(--purple);">INCREMENTAL UPDATE</div>
+              <div class="subcol-text">1. Snapshot affected subgraph<br>2. Mark stale<br>3. Re-ingest changed files only<br>4. Rebuild subgraph<br>5. Compute GraphDiff</div>
+            </div>
+          </div>
+          <div class="tags" style="margin-top:10px;">
+            <span class="tag">builder.py</span>
+            <span class="tag">updater.py</span>
+            <span class="tag">differ.py</span>
+            <span class="tag">schema.py</span>
+            <span class="tag">queries.py</span>
+            <span class="tag">connection.py</span>
+          </div>
+          <div class="bout">→ GraphDiff: new/removed/changed nodes, new/broken CHAINS_TO edges, posture delta score</div>
+        </div>
+      </div>
+
+      <!-- connector -->
+      <div class="vconn"><span class="vlabel">GraphDiff flows to reasoning agent</span></div>
+
+      <!-- ── STEP 3: Reasoning + Knowledge ── -->
+      <div class="slabel">Step 3 — Reason About Risk (LLM Agent)</div>
+      <div class="row">
+        <div class="block b-orange w2">
+          <div class="bhead">
+            <div class="bnum">4</div>
+            <div class="btitle">Reasoning Layer</div>
+          </div>
+          <div class="bdesc">
+            LangGraph ReAct agent with Claude. Receives the graph diff, then <strong>autonomously decides which tools to call</strong> to assess each finding in context. This is the "brain" — where static analysis becomes contextual intelligence.
+          </div>
+          <div class="tools-grid">
+            <div class="tool-card">
+              <div class="tname">graph_query</div>
+              <div class="tdesc">Run Cypher against Neo4j</div>
+            </div>
+            <div class="tool-card">
+              <div class="tname">knowledge_retrieve</div>
+              <div class="tdesc">RAG over CWE/CVE/OWASP</div>
+            </div>
+            <div class="tool-card">
+              <div class="tname">trace_dataflow</div>
+              <div class="tdesc">Follow call paths in graph</div>
+            </div>
+            <div class="tool-card">
+              <div class="tname">find_chains</div>
+              <div class="tdesc">Discover vuln chains via CHAINS_TO</div>
+            </div>
+            <div class="tool-card">
+              <div class="tname">assess_exploitability</div>
+              <div class="tdesc">Contextual severity from topology</div>
+            </div>
+            <div class="tool-card">
+              <div class="tname">generate_remediation</div>
+              <div class="tdesc">Code fix with diff</div>
+            </div>
+          </div>
+          <div class="tags" style="margin-top:10px;">
+            <span class="tag">agent.py</span>
+            <span class="tag">tools.py</span>
+            <span class="tag">chain_discovery.py</span>
+            <span class="tag">severity_scorer.py</span>
+          </div>
+          <div class="bout">→ PRSecurityReview: risk level, chains, contextual severity, remediations, block recommendation</div>
+        </div>
+
+        <div class="block b-yellow w1">
+          <div class="bhead">
+            <div class="bnum">5</div>
+            <div class="btitle">Knowledge Base</div>
+          </div>
+          <div class="bdesc">
+            Security knowledge the agent retrieves to enrich its assessments. Hybrid search: BM25 + dense embeddings with reciprocal rank fusion.
+          </div>
+          <div style="font-size:10px; color:var(--text-dim); line-height:1.8; margin-top:4px;">
+            <span style="color:var(--yellow);">CWE</span> — 900+ weakness types, attack patterns, mitigations<br>
+            <span style="color:var(--yellow);">CVE</span> — known vulnerabilities, CVSS, affected packages<br>
+            <span style="color:var(--yellow);">OWASP</span> — Top 10 2021, verification requirements
+          </div>
+          <div class="tags" style="margin-top:10px;">
+            <span class="tag">cwe_loader.py</span>
+            <span class="tag">cve_loader.py</span>
+            <span class="tag">owasp_loader.py</span>
+            <span class="tag">embedder.py</span>
+            <span class="tag">retriever.py</span>
+          </div>
+          <div class="bout">BGE-M3 embeddings → ChromaDB → hybrid retrieval</div>
+        </div>
+      </div>
+
+      <!-- connector -->
+      <div class="vconn"><span class="vlabel">PRSecurityReview flows to delivery</span></div>
+
+      <!-- ── STEP 4: Delivery + API ── -->
+      <div class="slabel">Step 4 — Deliver Results &amp; Accept Queries</div>
+      <div class="row">
+        <div class="block b-green w1">
+          <div class="bhead">
+            <div class="bnum">6</div>
+            <div class="btitle">Delivery Layer</div>
+          </div>
+          <div class="bdesc">
+            Posts results back to GitHub and records posture history for trend tracking.
+          </div>
+          <div style="font-size:10px; color:var(--text-dim); line-height:1.8; margin-top:2px;">
+            PR comment with chains + severity + fixes<br>
+            Commit status: pass / warn / fail<br>
+            PostureSnapshot nodes in Neo4j
+          </div>
+          <div class="tags" style="margin-top:8px;">
+            <span class="tag">github.py</span>
+            <span class="tag">history.py</span>
+          </div>
+        </div>
+
+        <div class="block b-pink w1">
+          <div class="bhead">
+            <div class="bnum">7</div>
+            <div class="btitle">REST API + NL Query</div>
+          </div>
+          <div class="bdesc">
+            Human interface — programmatic access and natural language questions about your security posture.
+          </div>
+          <div style="font-size:10px; color:var(--text-dim); line-height:1.8; margin-top:2px;">
+            <span style="color:var(--pink);">GET</span> /posture — current score + trend<br>
+            <span style="color:var(--pink);">GET</span> /findings — all findings with filters<br>
+            <span style="color:var(--pink);">GET</span> /chains — vulnerability chains<br>
+            <span style="color:var(--pink);">POST</span> /query — "What's our SSRF exposure?"<br>
+            <span style="color:var(--pink);">GET</span> /diff/{sha} — posture delta per commit
+          </div>
+          <div class="tags" style="margin-top:8px;">
+            <span class="tag">app.py</span>
+            <span class="tag">routes.py</span>
+            <span class="tag">nl_query.py</span>
+          </div>
+        </div>
+
+        <div class="block b-red w1">
+          <div class="bhead">
+            <div class="bnum">8</div>
+            <div class="btitle">Task Pipeline</div>
+          </div>
+          <div class="bdesc">
+            Celery async task that orchestrates the entire flow. Webhook → ingest → graph → agent → delivery. Retries on failure.
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--text-dim); line-height:1.8; margin-top:4px;">
+            1. repo checkout<br>
+            2. scope analysis<br>
+            3. incremental graph update<br>
+            4. graph diff<br>
+            5. reasoning agent<br>
+            6. github delivery<br>
+            7. posture snapshot
+          </div>
+          <div class="tags" style="margin-top:8px;">
+            <span class="tag">tasks/analysis.py</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ DATA STORES ════ -->
+    <div class="slabel" style="margin-top:22px;">Persistent State (Docker Volumes)</div>
+    <div class="stores">
+      <div class="store st-neo4j">
+        <div class="sicon">&#128280;</div>
+        <div class="sname">Neo4j</div>
+        <div class="sdesc">Threat graph — 7 node types, 10 edge types.<br>Persistent. Queryable via Cypher.<br>The living map of your attack surface.</div>
+      </div>
+      <div class="store st-redis">
+        <div class="sicon">&#9889;</div>
+        <div class="sname">Redis</div>
+        <div class="sdesc">Celery broker + result backend.<br>Queues webhook events.<br>Async with retries.</div>
+      </div>
+      <div class="store st-chroma">
+        <div class="sicon">&#128218;</div>
+        <div class="sname">ChromaDB</div>
+        <div class="sdesc">Vector store for security knowledge.<br>CWE + CVE + OWASP embeddings.<br>Hybrid search (BM25 + dense).</div>
+      </div>
+      <div class="store st-llm">
+        <div class="sicon">&#129504;</div>
+        <div class="sname">Claude API</div>
+        <div class="sdesc">LLM reasoning via tool use.<br>Agent decides which tools to call.<br>Structured, not a wrapper.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ OUTPUTS ════ -->
+  <div class="slabel" style="margin-top:32px;">What Users See</div>
+  <div class="outputs">
+    <div class="obox">
+      <div class="oicon">&#128172;</div>
+      <div class="otitle">PR Comment</div>
+      <div class="odesc">Posture delta, critical chains,<br>contextual severity, fix suggestions</div>
+    </div>
+    <div class="obox">
+      <div class="oicon">&#9989;</div>
+      <div class="otitle">Check Status</div>
+      <div class="odesc">Pass / Warn / Fail<br>configurable thresholds</div>
+    </div>
+    <div class="obox">
+      <div class="oicon">&#128200;</div>
+      <div class="otitle">Posture Trend</div>
+      <div class="odesc">Score over time — are we<br>getting safer per commit?</div>
+    </div>
+    <div class="obox">
+      <div class="oicon">&#128269;</div>
+      <div class="otitle">NL Queries</div>
+      <div class="odesc">"What if lodash gets<br>compromised?" → blast radius</div>
+    </div>
+    <div class="obox">
+      <div class="oicon">&#127760;</div>
+      <div class="otitle">Neo4j Browser</div>
+      <div class="odesc">Visual graph at :7474<br>see your full topology</div>
+    </div>
+  </div>
+
+  <!-- ════ KEY INSIGHT ════ -->
+  <div class="insight">
+    <div class="insight-title">The Core Insight — Why This Isn't Just Another Scanner</div>
+    <div class="insight-cols">
+      <div class="insight-col">
+        <strong style="color:var(--red);">Static tools (Semgrep, Bandit)</strong> find individual vulnerabilities in isolation. A SQL injection gets the same severity score everywhere — doesn't matter if it's behind 3 layers of auth or wide open to the internet.
+      </div>
+      <div class="insight-col">
+        <strong style="color:var(--cyan);">POSTURA</strong> knows the <strong>topology</strong>. The same SQL injection behind strong auth in an internal tool? <strong>LOW</strong>. Reachable from a public unauthenticated endpoint that touches PII? <strong>CRITICAL</strong>. That's what the graph + LLM reasoning enables — contextual severity based on real architecture, not rules.
+      </div>
+    </div>
+    <div class="insight-footer">
+      <span style="color:var(--purple);">Compositional risk:</span> Finding A (no input validation on public endpoint) <span style="color:var(--purple);">—[:CHAINS_TO]→</span> Finding B (SQL injection in internal function) because there exists a call-graph path from A's endpoint through to B's function, which :WRITES_TO a DataStore containing PII. Static tools see two separate medium findings. POSTURA sees one critical attack chain.
+    </div>
+  </div>
+</div>
+</body>
+</html>
