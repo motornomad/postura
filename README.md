@@ -6,12 +6,49 @@ POSTURA is an agentic security system that maintains a persistent Neo4j threat g
 
 ---
 
+## The problem static tools miss
+
+Two developers. Two innocent commits. Neither triggers a SAST alert alone.
+
+**Commit A** — Developer adds `GET /api/orders/<order_id>` without `@login_required`. Bandit and Semgrep flag it as a missing-auth warning. Not critical — the endpoint only returns order status. PR is merged.
+
+**Commit B** — Different developer adds `get_user_by_id()` to `db.py` and wires it into `get_order()` for the order confirmation view. A diff-only SAST scan of the changed files sees a new SQL query. Nothing in the diff says *"this query is now reachable from an unauthenticated public endpoint."* No alert fires.
+
+**What actually happened:** any unauthenticated HTTP request to `/api/orders/<any_id>` now returns the buyer's email, name, address, and phone number. No token required. No brute force. One GET request per order ID.
+
+POSTURA detects this because the graph persists across commits. When commit B creates the `CALLS` edge `get_order → get_user_by_id` and the `READS_FROM` edge to `DataStore(users, PII=true)`, chain discovery fires on the CWE-306 finding that was recorded in commit A:
+
+```
+[1] COMMIT A — PR NOT BLOCKED
+    ⚠ [CRITICAL] Missing Authentication on Public Endpoint (CWE-306)
+    ✓  No vulnerability chains detected
+    → PR DECISION: NOT BLOCKED  (missing auth flagged, chain incomplete)
+
+[2] COMMIT B — PR BLOCKED
+    🔴 1 vulnerability chain(s) detected:
+    Chain: [Missing Authentication on Public Endpoint] ──CHAINS_TO──▶ [users]
+    CWE:   CWE-306  |  Conf: 0.95
+    Evidence: Endpoint '/api/orders/<order_id>' has no authentication (CWE-306)
+    and its call chain directly reads PII from datastore 'users'.
+    An unauthenticated attacker can retrieve all user records.
+    → PR DECISION: BLOCKED  (CRITICAL chain confirmed)
+```
+
+Run this demo yourself:
+```bash
+docker compose up -d neo4j
+PYTHONPATH=src python demo/run_demo.py
+```
+
+---
+
 ## Why POSTURA
 
 Static tools (Bandit, Semgrep) find individual vulnerabilities but miss the context:
 
 | What static tools miss | How POSTURA closes the gap |
 |---|---|
+| Cross-commit chains — two safe commits combine into an exploit | Persistent graph remembers prior state across every commit |
 | Missing auth (CWE-306) — no static test for "should have auth" | Auth graph edge absence + public endpoint flag |
 | Contextual severity — code severity ≠ runtime severity | Graph paths: exposure × datastore sensitivity |
 | Supply-chain CVE reachability — CVE known, call-path unknown | USES edges: Function→Dependency + endpoint reachability |
