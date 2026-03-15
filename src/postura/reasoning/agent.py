@@ -215,12 +215,44 @@ def _get_agent_graph() -> Any:
     return _build_agent_graph()
 
 
+def _make_llm():
+    """Instantiate the LLM based on POSTURA_LLM_PROVIDER setting.
+
+    Supported providers:
+      anthropic         — Anthropic Claude (default)
+      openai            — OpenAI GPT models
+      openai_compatible — Any OpenAI-compatible local server:
+                          Ollama  (POSTURA_LLM_BASE_URL=http://localhost:11434/v1)
+                          vLLM    (POSTURA_LLM_BASE_URL=http://localhost:8000/v1)
+                          LM Studio (POSTURA_LLM_BASE_URL=http://localhost:1234/v1)
+    """
+    provider = settings.llm_provider.lower()
+
+    if provider == "anthropic":
+        return ChatAnthropic(
+            model=settings.llm_model,
+            api_key=settings.llm_api_key,
+            max_tokens=4096,
+        )
+
+    if provider in ("openai", "openai_compatible"):
+        from langchain_openai import ChatOpenAI
+        kwargs: dict = {
+            "model": settings.llm_model,
+            "api_key": settings.llm_api_key or "local",
+        }
+        if settings.llm_base_url:
+            kwargs["base_url"] = settings.llm_base_url
+        return ChatOpenAI(**kwargs)
+
+    raise ValueError(
+        f"Unknown POSTURA_LLM_PROVIDER: '{settings.llm_provider}'. "
+        "Valid options: anthropic, openai, openai_compatible"
+    )
+
+
 def _build_agent_graph() -> Any:
-    llm = ChatAnthropic(
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        max_tokens=4096,
-    ).bind_tools(_TOOLS)
+    llm = _make_llm().bind_tools(_TOOLS)
 
     def call_model(state: AgentState) -> AgentState:
         response = llm.invoke(state["messages"])

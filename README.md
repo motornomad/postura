@@ -143,7 +143,24 @@ postura status   # posture score + finding counts
 postura open     # open API dashboard in browser
 ```
 
-### 5. Bootstrap knowledge base (optional, improves agent reasoning)
+### 5. Local LLM (no Anthropic account needed)
+
+POSTURA works with any OpenAI-compatible local model server — Ollama, vLLM, LM Studio:
+
+```bash
+# Example: Ollama with Llama 3.2
+ollama pull llama3.2
+
+# In your .env:
+POSTURA_LLM_PROVIDER=openai_compatible
+POSTURA_LLM_BASE_URL=http://localhost:11434/v1
+POSTURA_LLM_MODEL=llama3.2
+POSTURA_LLM_API_KEY=ollama
+```
+
+For best results with local models use a code-aware model: `qwen2.5-coder`, `deepseek-coder-v2`, or `codellama`. The agent relies on structured tool calling — verify your chosen model supports it.
+
+### 6. Bootstrap knowledge base (optional, improves agent reasoning)
 
 ```bash
 # OWASP Top 10 (offline, always works)
@@ -275,6 +292,29 @@ PYTHONPATH=. .venv/bin/pytest tests/test_evaluation/ -v
 | P4 | Reasoning Layer (LangGraph agent, knowledge base, 6 tools) | ✅ |
 | P5 | Delivery & Reporting (GitHub integration, dashboard, NL query) | ✅ |
 | P5.5 | Evaluation Framework (ground truth, baseline, report generator) | ✅ |
+
+---
+
+## Security & Limitations
+
+**This is pre-production software.** Do not expose the API publicly without adding authentication in front of it.
+
+### What is hardened
+- **Webhook HMAC verification** — all GitHub webhook payloads are verified against `POSTURA_GITHUB_WEBHOOK_SECRET` using SHA-256 HMAC before processing (`webhook/receiver.py`). Set this secret or webhooks are rejected.
+- **Read-only Cypher** — the agent's `graph_query` tool blocks write operations (CREATE, MERGE, DELETE, SET) to prevent prompt injection from modifying the threat graph.
+- **Subprocess sandboxing** — Semgrep and Bandit run as subprocesses with a 120s timeout. They do not have network access.
+
+### What is not yet hardened (known gaps)
+- **No API authentication** — the REST API has no auth layer. Run it behind a reverse proxy with auth (nginx + basic auth, or a gateway) if exposed beyond localhost.
+- **No rate limiting** — add via your reverse proxy or a middleware like `slowapi`.
+- **No RBAC** — all API consumers have full read/write access to findings.
+- **No audit log** — finding status changes and agent runs are not logged to an immutable store.
+- **Secrets in the graph** — POSTURA's config analyzer detects hardcoded secrets in source files and stores the evidence string in Neo4j. The evidence is truncated to 200 chars but may contain partial secret values. Secure your Neo4j instance accordingly.
+
+### Data leaving your network
+When using `POSTURA_LLM_PROVIDER=anthropic` or `openai`, code context (function names, finding descriptions, diff summaries) is sent to the respective API. **No full source files are sent** — only the structured graph data extracted from them.
+
+Use `POSTURA_LLM_PROVIDER=openai_compatible` with a local model to keep all data on-premises.
 
 ---
 

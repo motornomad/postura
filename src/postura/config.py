@@ -10,9 +10,10 @@ class Settings(BaseSettings):
     github_webhook_secret: str = ""
     github_token: str = ""
 
-    llm_provider: str = "anthropic"         # "anthropic" | "openai"
+    llm_provider: str = "anthropic"         # "anthropic" | "openai" | "openai_compatible"
     llm_model: str = "claude-sonnet-4-20250514"
     llm_api_key: str = ""
+    llm_base_url: str = ""                  # for openai_compatible: e.g. http://localhost:11434/v1
 
     vector_store: str = "chromadb"          # "chromadb" | "qdrant"
     embedding_model: str = "BAAI/bge-m3"
