@@ -73,10 +73,61 @@ REST API (FastAPI)
 
 ### Prerequisites
 
-- Docker (for Neo4j and Redis)
 - Python 3.11+
+- Docker (for Neo4j and Redis)
 
-### 1. Start infrastructure
+### 1. Install
+
+```bash
+pip install postura
+```
+
+### 2. Initialize and start
+
+```bash
+postura init     # configure .env, pull Docker images
+postura start    # start Neo4j + Redis + API + Celery worker
+```
+
+### 3. Analyze a repository
+
+```bash
+# Offline: SAST + AST parse, no services required
+postura analyze ./myproject
+
+# Full: builds threat graph + discovers vulnerability chains
+postura analyze ./myproject --full
+```
+
+### 4. View results
+
+```bash
+postura status   # posture score + finding counts
+postura open     # open API dashboard in browser
+```
+
+### 5. Bootstrap knowledge base (optional, improves agent reasoning)
+
+```bash
+# OWASP Top 10 (offline, always works)
+curl -X POST "http://localhost:8000/api/v1/knowledge/reload?sources=owasp"
+
+# CWE + CVE (requires network)
+curl -X POST "http://localhost:8000/api/v1/knowledge/reload?sources=cwe,cve"
+```
+
+### 6. GitHub webhook integration
+
+```bash
+# Point your GitHub repo's webhook at:
+# http://<your-server>/webhook/github
+# Content-Type: application/json
+# Secret: $POSTURA_GITHUB_WEBHOOK_SECRET
+```
+
+### Manual setup (advanced)
+
+For custom deployments without the CLI:
 
 ```bash
 docker run -d --name neo4j \
@@ -85,51 +136,10 @@ docker run -d --name neo4j \
   neo4j:5
 
 docker run -d --name redis -p 6379:6379 redis:7-alpine
-```
 
-### 2. Install POSTURA
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]" --no-cache-dir
-```
-
-### 3. Configure
-
-```bash
-cp .env.example .env
-# Edit .env:
-# POSTURA_NEO4J_URI=bolt://localhost:7687
-# POSTURA_NEO4J_USER=neo4j
-# POSTURA_NEO4J_PASSWORD=postura_dev
-# POSTURA_ANTHROPIC_API_KEY=sk-ant-...
-# POSTURA_GITHUB_TOKEN=ghp_...   (for PR comments)
-```
-
-### 4. Bootstrap knowledge base
-
-```bash
-# OWASP Top 10 (offline, always works)
-curl -X POST "http://localhost:8000/api/v1/knowledge/reload?sources=owasp"
-
-# CWE + CVE (requires network — downloads MITRE XML and NVD API)
-curl -X POST "http://localhost:8000/api/v1/knowledge/reload?sources=cwe,cve"
-```
-
-### 5. Ingest a repository
-
-```bash
-# Start the API server
+cp .env.example .env  # fill in API keys
 uvicorn postura.api.app:app --reload
-
-# Start Celery worker (optional — for async analysis)
 celery -A postura.tasks.celery_app worker --loglevel=info
-
-# Point your GitHub repo's webhook at:
-# http://<your-server>/webhook/github
-# Content-Type: application/json
-# Secret: $POSTURA_WEBHOOK_SECRET
 ```
 
 ---

@@ -1,4 +1,5 @@
 """Neo4j driver wrapper with connection pooling and health check."""
+import logging
 from contextlib import contextmanager
 from typing import Generator
 
@@ -7,6 +8,9 @@ from neo4j.exceptions import ServiceUnavailable
 
 from postura.config import settings
 
+# Suppress neo4j notification spam (e.g. "relationship type USES does not exist yet")
+# These are harmless schema-order warnings, not errors.
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 
 _driver: Driver | None = None
 

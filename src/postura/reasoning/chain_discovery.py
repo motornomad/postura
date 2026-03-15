@@ -44,53 +44,51 @@ def discover_chains() -> int:
 def _rule1_public_sqli_pii() -> int:
     """
     Detect: unauthenticated endpoint whose call chain reaches a SQLi finding
-    that reads from a PII DataStore.
+    reachable from a public endpoint that also has access to a PII DataStore.
+    Creates CHAINS_TO from SQLi Finding → PII DataStore.
     """
     results = run_query(
         """
-        // Find SQLi findings that affect functions reading from PII datastores
+        // Find SQLi findings on functions
         MATCH (sqli:Finding)
         WHERE sqli.cwe_id IN ['CWE-89', 'CWE-564'] OR sqli.rule_id CONTAINS 'sql'
               OR sqli.title CONTAINS 'SQL' OR sqli.description CONTAINS 'SQL inject'
         MATCH (sqli)-[:AFFECTS]->(vuln_fn:Function)
-        MATCH (vuln_fn)-[:READS_FROM|WRITES_TO]->(ds:DataStore {contains_pii: true})
 
-        // Find public endpoints whose handlers can reach the vulnerable function
+        // Public endpoint can reach the vulnerable function
         MATCH (ep:Endpoint {is_public: true})-[:HANDLED_BY]->(handler:Function)
-        MATCH path = (handler)-[:CALLS*0..6]->(vuln_fn)
+        MATCH (handler)-[:CALLS*0..6]->(vuln_fn)
 
-        // Is there a missing-auth finding for this endpoint or something nearby?
-        OPTIONAL MATCH (auth_finding:Finding)-[:AFFECTS]->(ep)
+        // PII datastore reachable anywhere from this endpoint's call graph
+        MATCH (ep)-[:HANDLED_BY]->(h2:Function)
+        MATCH (h2)-[:CALLS*0..6]->(pii_fn:Function)-[:READS_FROM|WRITES_TO]->(ds:DataStore {contains_pii: true})
 
         RETURN DISTINCT sqli.uid AS sqli_uid, sqli.title AS sqli_title,
-               ep.path AS ep_path, ep.uid AS ep_uid,
-               ds.name AS ds_name, ds.uid AS ds_uid,
-               auth_finding.uid AS auth_uid,
-               length(path) AS path_len
+               ep.path AS ep_path,
+               ds.name AS ds_name, ds.uid AS ds_uid
         """
     )
 
     count = 0
+    seen: set[tuple[str, str]] = set()
     for row in results:
         sqli_uid = row.get("sqli_uid")
-        auth_uid = row.get("auth_uid")
-
-        if not sqli_uid:
+        ds_uid = row.get("ds_uid")
+        if not sqli_uid or not ds_uid:
             continue
+        key = (sqli_uid, ds_uid)
+        if key in seen:
+            continue
+        seen.add(key)
 
-        # If there's also a missing-auth finding, chain them
-        if auth_uid:
-            evidence = (
-                f"Public endpoint '{row.get('ep_path')}' (missing auth) leads via call graph "
-                f"to SQL injection in a function that reads from PII datastore '{row.get('ds_name')}'. "
-                f"Call chain depth: {row.get('path_len', '?')} hops."
-            )
-            _create_chain_edge(auth_uid, sqli_uid, evidence, confidence=0.95, path_length=2)
-            count += 1
-        else:
-            # Still create a chain from the endpoint's own "public access" context
-            # represented as a note on the SQLi finding itself
-            _annotate_reachable(sqli_uid, reachable=True, from_public=True)
+        evidence = (
+            f"SQL injection in function reachable from public endpoint '{row.get('ep_path')}'. "
+            f"The endpoint's call graph also accesses PII datastore '{row.get('ds_name')}'. "
+            "An attacker can exploit the injection to exfiltrate user PII."
+        )
+        _create_chain_to_datastore(sqli_uid, ds_uid, evidence, confidence=0.90)
+        _annotate_reachable(sqli_uid, reachable=True, from_public=True)
+        count += 1
 
     return count
 
@@ -101,46 +99,46 @@ def _rule1_public_sqli_pii() -> int:
 
 def _rule2_missing_auth_pii() -> int:
     """
-    Detect: endpoint with missing-auth finding whose call chain reads PII.
+    Detect: CWE-306 finding on a handler function whose call chain reads PII.
+    Creates CHAINS_TO from CWE-306 Finding → PII DataStore.
     """
     results = run_query(
         """
-        // Missing auth findings on endpoints
-        MATCH (missing_auth:Finding)-[:AFFECTS]->(ep:Endpoint)
-        WHERE (missing_auth.type = 'sast' OR missing_auth.rule_id CONTAINS 'auth'
-              OR missing_auth.description CONTAINS 'auth')
+        // CWE-306 finding on a handler function
+        MATCH (missing_auth:Finding {cwe_id: 'CWE-306'})-[:AFFECTS]->(handler:Function)
 
-        // The endpoint is public
-        AND ep.is_public = true
+        // Handler is linked to a public endpoint
+        MATCH (ep:Endpoint {is_public: true})-[:HANDLED_BY]->(handler)
 
-        // Handler can reach a PII datastore
-        MATCH (ep)-[:HANDLED_BY]->(handler:Function)
-        MATCH path = (handler)-[:CALLS*0..5]->(fn:Function)-[:READS_FROM|WRITES_TO]->(ds:DataStore {contains_pii: true})
-
-        // Any finding on the function reaching PII
-        OPTIONAL MATCH (pii_finding:Finding)-[:AFFECTS]->(fn)
+        // Call chain reaches a PII datastore
+        MATCH (handler)-[:CALLS*0..5]->(fn:Function)-[:READS_FROM|WRITES_TO]->(ds:DataStore {contains_pii: true})
 
         RETURN DISTINCT missing_auth.uid AS auth_uid,
-               pii_finding.uid AS pii_uid,
                ep.path AS ep_path,
-               ds.name AS ds_name,
-               length(path) AS path_len
+               ds.name AS ds_name, ds.uid AS ds_uid
         """
     )
 
     count = 0
+    seen: set[tuple[str, str]] = set()
     for row in results:
         auth_uid = row.get("auth_uid")
-        pii_uid = row.get("pii_uid")
+        ds_uid = row.get("ds_uid")
+        if not auth_uid or not ds_uid:
+            continue
+        key = (auth_uid, ds_uid)
+        if key in seen:
+            continue
+        seen.add(key)
 
-        if auth_uid and pii_uid and auth_uid != pii_uid:
-            evidence = (
-                f"Endpoint '{row.get('ep_path')}' has no authentication and its call chain "
-                f"reaches a function with a finding that accesses PII datastore '{row.get('ds_name')}'. "
-                f"An attacker can directly access user data without authentication."
-            )
-            _create_chain_edge(auth_uid, pii_uid, evidence, confidence=0.90, path_length=2)
-            count += 1
+        evidence = (
+            f"Endpoint '{row.get('ep_path')}' has no authentication (CWE-306) and its "
+            f"call chain directly reads PII from datastore '{row.get('ds_name')}'. "
+            "An unauthenticated attacker can retrieve all user records including email and password hashes."
+        )
+        _create_chain_to_datastore(auth_uid, ds_uid, evidence, confidence=0.95)
+        _annotate_reachable(auth_uid, reachable=True, from_public=True)
+        count += 1
 
     return count
 
@@ -189,6 +187,29 @@ def _rule3_supply_chain_public() -> int:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _create_chain_to_datastore(
+    finding_uid: str,
+    datastore_uid: str,
+    evidence: str,
+    confidence: float = 0.8,
+) -> None:
+    """Create a :CHAINS_TO edge from a Finding node to a DataStore node."""
+    run_write(
+        """
+        MATCH (f:Finding {uid: $finding_uid})
+        MATCH (d:DataStore {uid: $datastore_uid})
+        MERGE (f)-[r:CHAINS_TO]->(d)
+        SET r.evidence = $evidence, r.confidence = $confidence
+        """,
+        {
+            "finding_uid": finding_uid,
+            "datastore_uid": datastore_uid,
+            "evidence": evidence,
+            "confidence": confidence,
+        },
+    )
+
 
 def _create_chain_edge(
     from_uid: str,

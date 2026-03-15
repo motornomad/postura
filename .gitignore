@@ -28,15 +28,41 @@ ENV/
 .env.local
 .env.production
 
+# Scratch / dev files at repo root (not for public repo)
+demo_ingest.py
+test_pip.py
+
 # Internal planning docs (not for public repo)
 IMPLEMENTATION_CONTEXT.md
 POSTURA_ARCHITECTURE.md
 TODO.md
 AGENT_HANDOFF.md
+PIP_PACKAGE_PLAN.md
+v2.md
 test.md
 docs/CODEBASE_TEST_PLAN.md
 docs/TEST_PLAN_RESULTS.md
 docs/BLOG_POST.md
+
+# Demo app (local only, not part of the package)
+demo/
+
+# Secrets / keys
+*.pem
+*.key
+*.p8
+id_rsa
+id_ed25519
+*.pfx
+*.p12
+
+# Claude / AI session files
+.claude/
+*.claude_*
+
+# Logs
+*.log
+logs/
 
 # Knowledge store (generated, large binary embeddings)
 knowledge_store/
@@ -46,6 +72,8 @@ knowledge_data/cwe/*.xml
 knowledge_data/cwe/*.zip
 knowledge_data/cve/*.json
 knowledge_data/owasp/*.html
+
+images/
 
 # Neo4j local data
 neo4j_data/

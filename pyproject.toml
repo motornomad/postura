@@ -4,11 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "postura"
-version = "0.1.0"
+version = "0.1.2"
 description = "Attack Surface Posture Agent — agentic security graph for your codebase"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    {name = "Arunabh Majumdar", email = "arunabh.majumdar@gmail.com"}
+]
+license = {text = "MIT"}
+keywords = ["security", "sast", "vulnerability", "graph", "llm", "agent", "appsec"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
+    "click>=8.1.0",
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",
     "neo4j>=5.17.0",
@@ -41,11 +55,17 @@ dev = [
     "pytest-cov>=4.1.0",
 ]
 
+[project.scripts]
+postura = "postura.cli:cli"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-dir]
 "" = "src"
+
+[tool.setuptools.package-data]
+"postura" = ["docker-compose.yml", ".env.example"]
 
 [tool.ruff]
 line-length = 100

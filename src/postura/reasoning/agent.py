@@ -25,6 +25,7 @@ from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+from pydantic import BaseModel
 from typing_extensions import TypedDict
 
 from postura.config import settings
@@ -52,6 +53,9 @@ Focus on:
 2. Are any new vulnerabilities chained (composing into higher-risk scenarios)?
 3. What is the business impact (PII exposure, auth bypass, remote code execution)?
 4. What specific remediations are required?
+
+When you have completed your analysis, you MUST call the submit_review tool with your
+structured findings. This is required — do not end your response with free text.
 """
 
 
@@ -146,9 +150,41 @@ def generate_remediation(finding_uid: str, additional_context: str = "") -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# submit_review — structured final output tool (GAP 1 fix)
+# ---------------------------------------------------------------------------
+
+class _ReviewOutput(BaseModel):
+    risk_level: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"]
+    requires_block: bool
+    top_issues: list[str]
+    summary: str
+
+
+@tool
+def submit_review(
+    risk_level: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"],
+    requires_block: bool,
+    top_issues: list[str],
+    summary: str,
+) -> str:
+    """Submit the final structured security review. Call this as your last action
+    after completing your analysis. This is how your assessment is recorded.
+
+    Args:
+        risk_level: Overall risk level: CRITICAL, HIGH, MEDIUM, LOW, or NONE.
+        requires_block: True if this PR should be blocked from merging.
+        top_issues: List of the top finding titles (max 5).
+        summary: One-paragraph summary of the risk and required actions.
+    """
+    # The actual extraction happens in run_pr_review by inspecting tool call args.
+    return f"Review submitted: {risk_level}"
+
+
 _TOOLS = [
     graph_query, knowledge_retrieve, trace_dataflow,
     find_chains, assess_exploitability, generate_remediation,
+    submit_review,
 ]
 
 
@@ -163,8 +199,20 @@ class AgentState(TypedDict):
 def _should_continue(state: AgentState) -> Literal["tools", "end"]:
     last = state["messages"][-1]
     if isinstance(last, AIMessage) and last.tool_calls:
+        # If the only tool call is submit_review, we're done
+        tool_names = [tc["name"] for tc in last.tool_calls]
+        if tool_names == ["submit_review"]:
+            return "end"
         return "tools"
     return "end"
+
+
+import functools
+
+
+@functools.lru_cache(maxsize=1)
+def _get_agent_graph() -> Any:
+    return _build_agent_graph()
 
 
 def _build_agent_graph() -> Any:
@@ -212,7 +260,7 @@ def run_pr_review(
     Returns:
         PRSecurityReview with agent's assessment.
     """
-    agent = _build_agent_graph()
+    agent = _get_agent_graph()
 
     user_message = _build_review_prompt(commit_sha, diff_summary, pr_number, new_finding_uids)
 
@@ -224,7 +272,28 @@ def run_pr_review(
             ]
         })
         final_message = result["messages"][-1]
-        analysis_text = final_message.content if isinstance(final_message.content, str) else str(final_message.content)
+
+        # Check if agent called submit_review (structured path)
+        if isinstance(final_message, AIMessage) and final_message.tool_calls:
+            for tc in final_message.tool_calls:
+                if tc["name"] == "submit_review":
+                    args = tc["args"]
+                    return PRSecurityReview(
+                        commit_sha=commit_sha,
+                        pr_number=pr_number,
+                        risk_level=args.get("risk_level", "UNKNOWN"),
+                        requires_block=args.get("requires_block", False),
+                        top_issues=args.get("top_issues", []),
+                        full_analysis=args.get("summary", ""),
+                        finding_count=len(args.get("top_issues", [])),
+                    )
+
+        # Fallback: parse free text (regex) if submit_review wasn't called
+        analysis_text = (
+            final_message.content
+            if isinstance(final_message.content, str)
+            else str(final_message.content)
+        )
     except Exception as exc:
         logger.error("Agent invocation failed: %s", exc)
         analysis_text = f"Agent failed: {exc}"
@@ -254,11 +323,8 @@ def _build_review_prompt(
         "3. Use find_chains to check for vulnerability chains\n"
         "4. Use knowledge_retrieve to enrich your understanding of each CWE\n"
         "5. Use trace_dataflow for publicly reachable findings\n"
-        "6. Summarize: overall risk, top 3 findings to fix, recommended actions\n"
-        "7. End your response with a structured summary:\n"
-        "   RISK_LEVEL: CRITICAL|HIGH|MEDIUM|LOW|NONE\n"
-        "   TOP_ISSUES: <comma-separated list of finding titles>\n"
-        "   REQUIRES_BLOCK: YES|NO (should this PR be blocked?)"
+        "6. When analysis is complete, call submit_review with your structured findings.\n"
+        "   Do not output a free-text summary — use the submit_review tool."
     )
     return "\n".join(parts)
 

@@ -242,28 +242,20 @@ def assess_exploitability(finding_uid: str) -> dict[str, Any]:
     ctx["pii_datastores"] = [dict(r) for r in pii_rows]
     ctx["exposes_pii"] = len(pii_rows) > 0
 
-    # Trust zone
+    # Trust zone — check both Function→TrustZone and Endpoint→TrustZone in one query
     zone_rows = run_query(
         """
         MATCH (f:Finding {uid: $uid})-[:AFFECTS]->(fn:Function)
-        MATCH (ep:Endpoint)-[:HANDLED_BY]->(fn)-[:IN_ZONE]->(tz:TrustZone)
-        RETURN DISTINCT tz.name AS zone, tz.level AS level
+        OPTIONAL MATCH (ep:Endpoint)-[:HANDLED_BY]->(fn)
+        OPTIONAL MATCH (fn)-[:IN_ZONE]->(tz1:TrustZone)
+        OPTIONAL MATCH (ep)-[:IN_ZONE]->(tz2:TrustZone)
+        WITH DISTINCT coalesce(tz1, tz2) AS tz
+        WHERE tz IS NOT NULL
+        RETURN tz.name AS zone, tz.level AS level
         LIMIT 3
         """,
         {"uid": finding_uid},
     )
-    # Alternatively check endpoint trust zone
-    if not zone_rows:
-        zone_rows = run_query(
-            """
-            MATCH (f:Finding {uid: $uid})-[:AFFECTS]->(fn:Function)
-            MATCH (ep:Endpoint)-[:HANDLED_BY]->(fn)
-            MATCH (ep)-[:IN_ZONE]->(tz:TrustZone)
-            RETURN DISTINCT tz.name AS zone, tz.level AS level
-            LIMIT 3
-            """,
-            {"uid": finding_uid},
-        )
     ctx["trust_zones"] = [dict(r) for r in zone_rows]
     ctx["lowest_trust_zone"] = min(
         (r["level"] for r in zone_rows if r.get("level") is not None),

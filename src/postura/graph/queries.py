@@ -26,13 +26,17 @@ def get_findings_by_severity(severity: str) -> list[dict]:
 
 
 def get_chains() -> list[dict]:
-    """Return all vulnerability chains (CHAINS_TO edges)."""
+    """Return all vulnerability chains (CHAINS_TO edges — Finding→Finding or Finding→DataStore)."""
     return run_query(
         """
-        MATCH path = (f1:Finding)-[:CHAINS_TO*1..5]->(f2:Finding)
-        RETURN f1, f2, length(path) AS chain_length,
-               [n IN nodes(path) | n.uid] AS chain_uids
-        ORDER BY chain_length DESC
+        MATCH (f1:Finding)-[r:CHAINS_TO]->(target)
+        RETURN f1.uid AS from_uid, f1.title AS from_title,
+               f1.cwe_id AS from_cwe, f1.contextual_severity AS from_severity,
+               labels(target) AS target_labels,
+               CASE WHEN target:Finding THEN target.title ELSE target.name END AS target_name,
+               CASE WHEN target:Finding THEN target.uid ELSE target.uid END AS target_uid,
+               r.evidence AS evidence, r.confidence AS confidence
+        ORDER BY r.confidence DESC
         """
     )
 

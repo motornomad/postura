@@ -38,6 +38,13 @@ _AUTH_DEC_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# Paths that are intentionally public — skip CWE-306 for these
+_INTENTIONALLY_PUBLIC_PATHS = re.compile(
+    r"^/(health|ping|status|metrics|favicon"
+    r"|api/auth/|auth/|login|logout|register|signup|reset-password|verify)",
+    re.IGNORECASE,
+)
+
 # PII heuristic: table/variable names that suggest personal data
 _PII_KEYWORDS = {
     "user", "users", "email", "emails", "password", "passwords",
@@ -66,8 +73,21 @@ class GraphBuilder:
         self.repo_root = repo_root
         self._function_uid_map: dict[str, str] = {}  # qualified_name → uid
 
-    def build(self, result: StructuredIngestResult, requirements_file: str = "") -> None:
-        """Full graph build: all node/edge types."""
+    def build(
+        self,
+        result: StructuredIngestResult,
+        requirements_file: str = "",
+        run_post_processing: bool = True,
+    ) -> None:
+        """Full graph build: all node/edge types.
+
+        Args:
+            result: Parsed ingest result to build from.
+            requirements_file: Optional path to requirements.txt for dep scanning.
+            run_post_processing: If True (default), runs chain discovery and
+                contextual severity scoring after building. Set to False when
+                called from updater.py since differ.py will run these anyway.
+        """
         self._create_service_node()
         self._create_trustzones()
         self._create_function_nodes(result.ast_nodes)
@@ -78,6 +98,12 @@ class GraphBuilder:
         self._create_config_finding_nodes(result.config_issues)
         self._create_dependency_nodes(result.dep_vulnerabilities, requirements_file)
         self._create_uses_edges(result)
+
+        if run_post_processing:
+            from postura.reasoning.chain_discovery import discover_chains
+            from postura.reasoning.severity_scorer import score_all_findings
+            discover_chains()
+            score_all_findings()
 
     # ------------------------------------------------------------------
     # Service node
@@ -287,7 +313,53 @@ class GraphBuilder:
                 {"ep_uid": uid, "tz_uid": zone_uid},
             )
 
+            # CWE-306: create a missing-auth finding for public unauthenticated endpoints
+            # Skip paths that are intentionally public (health checks, auth endpoints)
+            if is_public and not ep.auth_required and not _INTENTIONALLY_PUBLIC_PATHS.match(ep.path):
+                self._create_missing_auth_finding(uid, ep)
+
         logger.info("Created/updated %d Endpoint nodes", len(endpoints))
+
+    def _create_missing_auth_finding(self, ep_uid: str, ep: "EndpointInfo") -> None:
+        """Create a CWE-306 Missing Authentication finding and link it to the handler function."""
+        f_uid = make_finding_uid("postura", "CWE-306", ep.file, ep.line)
+        params = finding_node_params(
+            uid=f_uid,
+            finding_type="sast",
+            tool="postura",
+            rule_id="CWE-306",
+            title="Missing Authentication on Public Endpoint",
+            description=(
+                f"Endpoint {ep.method} {ep.path} is publicly accessible with no "
+                "authentication requirement. Any unauthenticated caller can invoke it."
+            ),
+            raw_severity="HIGH",
+            file=ep.file,
+            line=ep.line,
+            cwe_id="CWE-306",
+        )
+        run_write(
+            """
+            MERGE (f:Finding {uid: $uid})
+            SET f.type = $type, f.tool = $tool, f.rule_id = $rule_id,
+                f.cwe_id = $cwe_id, f.title = $title, f.description = $description,
+                f.raw_severity = $raw_severity, f.contextual_severity = $contextual_severity,
+                f.status = $status, f.evidence = $evidence,
+                f.file = $file, f.line = $line
+            """,
+            params,
+        )
+        # AFFECTS the handler function (not the endpoint) — matches GROUND_TRUTH F2
+        handler_uid = self._function_uid_map.get(ep.handler_function)
+        if handler_uid:
+            run_write(
+                """
+                MATCH (finding:Finding {uid: $f_uid})
+                MATCH (fn:Function {uid: $fn_uid})
+                MERGE (finding)-[:AFFECTS]->(fn)
+                """,
+                {"f_uid": f_uid, "fn_uid": handler_uid},
+            )
 
     def _infer_trust_zone(self, ep: EndpointInfo) -> str:
         """Infer trust zone from path and auth status."""
