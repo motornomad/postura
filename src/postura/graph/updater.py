@@ -154,10 +154,11 @@ def _ingest_changed_files(changed_files: list[str], repo_path: str) -> Structure
             module = rel_file.replace("/", ".").replace("\\", ".")[:-3]
 
             # AST parse
-            nodes, edges, accesses, imports = parse_file(abs_path, repo_path)
+            nodes, edges, accesses, imports, taint_flows = parse_file(abs_path, repo_path)
             result.ast_nodes.extend(nodes)
             result.call_edges.extend(edges)
             result.data_accesses.extend(accesses)
+            result.taint_flows.extend(taint_flows)
             if imports:
                 result.file_imports[rel_file] = imports
 

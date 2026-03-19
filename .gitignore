@@ -39,13 +39,18 @@ TODO.md
 AGENT_HANDOFF.md
 PIP_PACKAGE_PLAN.md
 v2.md
+v1.md
 test.md
 docs/CODEBASE_TEST_PLAN.md
 docs/TEST_PLAN_RESULTS.md
 docs/BLOG_POST.md
+docs/cursor_strategy.md
+docs/research_paper_strategy.md
 
 # Demo app (local only, not part of the package)
 demo/
+
+ajvc_strategy/
 
 # Secrets / keys
 *.pem

@@ -18,7 +18,7 @@ from pathlib import Path
 from postura.graph.connection import run_write, run_query
 from postura.models.ingest import (
     ASTNode, CallEdge, SASTFinding, DepVulnerability,
-    EndpointInfo, ConfigIssue, StructuredIngestResult, DataAccessEvent,
+    EndpointInfo, ConfigIssue, StructuredIngestResult, DataAccessEvent, TaintFlow,
 )
 from postura.models.graph import (
     make_function_uid, make_endpoint_uid, make_finding_uid,
@@ -98,6 +98,7 @@ class GraphBuilder:
         self._create_config_finding_nodes(result.config_issues)
         self._create_dependency_nodes(result.dep_vulnerabilities, requirements_file)
         self._create_uses_edges(result)
+        self._create_taint_flow_annotations(result)
 
         if run_post_processing:
             from postura.reasoning.chain_discovery import discover_chains
@@ -661,6 +662,82 @@ class GraphBuilder:
                 {"edges": edges},
             )
         logger.info("Created/updated %d USES edges (Function → Dependency)", len(edges))
+
+
+    # ------------------------------------------------------------------
+    # Taint flow annotations (V2.1d)
+    # ------------------------------------------------------------------
+
+    def _create_taint_flow_annotations(self, result: StructuredIngestResult) -> None:
+        """Annotate Function nodes with taint evidence and create TAINT_FLOWS_TO edges.
+
+        For each TaintFlow:
+          - Sets has_taint_flow=true, taint_sink_types, taint_source_params on the Function node.
+          - Creates a self-referential TAINT_FLOWS_TO edge carrying sink evidence.
+
+        Inter-function TAINT_FLOWS_TO edges (1-hop) are created via
+        chain_discovery._rule_taint_inter_function() using the CALLS graph.
+        """
+        if not result.taint_flows:
+            return
+
+        # Group flows by function
+        flows_by_fn: dict[str, list[TaintFlow]] = {}
+        for flow in result.taint_flows:
+            flows_by_fn.setdefault(flow.function_qualified_name, []).append(flow)
+
+        for fn_qname, flows in flows_by_fn.items():
+            fn_uid = self._function_uid_map.get(fn_qname)
+            if not fn_uid:
+                continue
+
+            sink_types = list({f.sink_type for f in flows})
+            source_params = list({f.source_param for f in flows})
+
+            # Annotate the Function node
+            run_write(
+                """
+                MATCH (f:Function {uid: $uid})
+                SET f.has_taint_flow = true,
+                    f.taint_sink_types = $sink_types,
+                    f.taint_source_params = $source_params
+                """,
+                {
+                    "uid": fn_uid,
+                    "sink_types": sink_types,
+                    "source_params": source_params,
+                },
+            )
+
+            # Create self-referential TAINT_FLOWS_TO edges (one per unique sink type)
+            for flow in flows:
+                run_write(
+                    """
+                    MATCH (f:Function {uid: $uid})
+                    MERGE (f)-[r:TAINT_FLOWS_TO {sink_type: $sink_type}]->(f)
+                    SET r.source_param = $source_param,
+                        r.source_type = $source_type,
+                        r.sink_call = $sink_call,
+                        r.sanitized = $sanitized,
+                        r.source_line = $source_line,
+                        r.sink_line = $sink_line
+                    """,
+                    {
+                        "uid": fn_uid,
+                        "source_param": flow.source_param,
+                        "source_type": flow.source_type,
+                        "sink_call": flow.sink_call,
+                        "sink_type": flow.sink_type,
+                        "sanitized": flow.sanitized,
+                        "source_line": flow.source_line,
+                        "sink_line": flow.sink_line,
+                    },
+                )
+
+        logger.info(
+            "Annotated %d Function nodes with taint evidence (%d flows total)",
+            len(flows_by_fn), len(result.taint_flows),
+        )
 
 
 def build_graph_from_result(

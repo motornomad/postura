@@ -30,11 +30,72 @@ def discover_chains() -> int:
     Returns the number of new chains created.
     """
     total = 0
+    total += _rule_taint_inter_function()   # V2.1c: 1-hop inter-function taint propagation
     total += _rule1_public_sqli_pii()
     total += _rule2_missing_auth_pii()
     total += _rule3_supply_chain_public()
     logger.info("Chain discovery: %d chains created/updated", total)
     return total
+
+
+# ---------------------------------------------------------------------------
+# V2.1c: Inter-function taint propagation — 1-hop TAINT_FLOWS_TO edges
+# ---------------------------------------------------------------------------
+
+def _rule_taint_inter_function() -> int:
+    """Create TAINT_FLOWS_TO edges between caller/callee when:
+      - Callee has confirmed taint flow (has_taint_flow=true)
+      - Caller has confirmed HTTP request sources (taint_sources field populated)
+      - Caller CALLS callee
+
+    This captures "login() passes request.form data → get_user_by_name() → cursor.execute".
+    """
+    results = run_query(
+        """
+        MATCH (callee:Function {has_taint_flow: true})
+        MATCH (caller:Function)-[:CALLS]->(callee)
+        WHERE caller.taint_sources IS NOT NULL AND size(caller.taint_sources) > 0
+        RETURN DISTINCT caller.uid AS caller_uid, callee.uid AS callee_uid,
+               caller.qualified_name AS caller_name, callee.qualified_name AS callee_name,
+               callee.taint_sink_types AS sink_types,
+               callee.taint_source_params AS sink_params
+        """
+    )
+
+    count = 0
+    for row in results:
+        caller_uid = row.get("caller_uid")
+        callee_uid = row.get("callee_uid")
+        if not caller_uid or not callee_uid or caller_uid == callee_uid:
+            continue
+
+        sink_types = row.get("sink_types") or []
+        sink_params = row.get("sink_params") or []
+        sink_type_str = ", ".join(sink_types) if sink_types else "unknown"
+        param_str = ", ".join(sink_params) if sink_params else "unknown"
+
+        run_write(
+            """
+            MATCH (caller:Function {uid: $caller_uid})
+            MATCH (callee:Function {uid: $callee_uid})
+            MERGE (caller)-[r:TAINT_FLOWS_TO]->(callee)
+            SET r.hop = 1,
+                r.sink_type = $sink_type,
+                r.via_param = $via_param,
+                r.confidence = 0.9
+            """,
+            {
+                "caller_uid": caller_uid,
+                "callee_uid": callee_uid,
+                "sink_type": sink_type_str,
+                "via_param": param_str,
+            },
+        )
+        count += 1
+
+    if count:
+        logger.info("Taint inter-function: created %d 1-hop TAINT_FLOWS_TO edges", count)
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -63,9 +124,13 @@ def _rule1_public_sqli_pii() -> int:
         MATCH (ep)-[:HANDLED_BY]->(h2:Function)
         MATCH (h2)-[:CALLS*0..6]->(pii_fn:Function)-[:READS_FROM|WRITES_TO]->(ds:DataStore {contains_pii: true})
 
+        // Check for taint evidence: any function in the chain has a confirmed taint flow
+        OPTIONAL MATCH (handler)-[:TAINT_FLOWS_TO*0..3]->(tainted_fn:Function {has_taint_flow: true})
+
         RETURN DISTINCT sqli.uid AS sqli_uid, sqli.title AS sqli_title,
                ep.path AS ep_path,
-               ds.name AS ds_name, ds.uid AS ds_uid
+               ds.name AS ds_name, ds.uid AS ds_uid,
+               tainted_fn IS NOT NULL AS has_taint_evidence
         """
     )
 
@@ -81,12 +146,18 @@ def _rule1_public_sqli_pii() -> int:
             continue
         seen.add(key)
 
+        has_taint = bool(row.get("has_taint_evidence"))
+        taint_note = (
+            " Taint analysis confirms user-controlled input flows to the SQL sink."
+            if has_taint else ""
+        )
         evidence = (
             f"SQL injection in function reachable from public endpoint '{row.get('ep_path')}'. "
-            f"The endpoint's call graph also accesses PII datastore '{row.get('ds_name')}'. "
-            "An attacker can exploit the injection to exfiltrate user PII."
+            f"The endpoint's call graph also accesses PII datastore '{row.get('ds_name')}'."
+            f"{taint_note} An attacker can exploit the injection to exfiltrate user PII."
         )
-        _create_chain_to_datastore(sqli_uid, ds_uid, evidence, confidence=0.90)
+        confidence = 1.0 if has_taint else 0.90
+        _create_chain_to_datastore(sqli_uid, ds_uid, evidence, confidence=confidence)
         _annotate_reachable(sqli_uid, reachable=True, from_public=True)
         count += 1
 
@@ -113,9 +184,13 @@ def _rule2_missing_auth_pii() -> int:
         // Call chain reaches a PII datastore
         MATCH (handler)-[:CALLS*0..5]->(fn:Function)-[:READS_FROM|WRITES_TO]->(ds:DataStore {contains_pii: true})
 
+        // Check for taint evidence: handler or its callees have confirmed HTTP request sources
+        OPTIONAL MATCH (handler)-[:TAINT_FLOWS_TO*0..3]->(tainted_fn:Function {has_taint_flow: true})
+
         RETURN DISTINCT missing_auth.uid AS auth_uid,
                ep.path AS ep_path,
-               ds.name AS ds_name, ds.uid AS ds_uid
+               ds.name AS ds_name, ds.uid AS ds_uid,
+               tainted_fn IS NOT NULL AS has_taint_evidence
         """
     )
 
@@ -131,12 +206,19 @@ def _rule2_missing_auth_pii() -> int:
             continue
         seen.add(key)
 
+        has_taint = bool(row.get("has_taint_evidence"))
+        taint_note = (
+            " Taint analysis confirms user-controlled input flows from the request to the PII datastore."
+            if has_taint else ""
+        )
         evidence = (
             f"Endpoint '{row.get('ep_path')}' has no authentication (CWE-306) and its "
-            f"call chain directly reads PII from datastore '{row.get('ds_name')}'. "
+            f"call chain directly reads PII from datastore '{row.get('ds_name')}'."
+            f"{taint_note} "
             "An unauthenticated attacker can retrieve all user records including email and password hashes."
         )
-        _create_chain_to_datastore(auth_uid, ds_uid, evidence, confidence=0.95)
+        confidence = 1.0 if has_taint else 0.95
+        _create_chain_to_datastore(auth_uid, ds_uid, evidence, confidence=confidence)
         _annotate_reachable(auth_uid, reachable=True, from_public=True)
         count += 1
 

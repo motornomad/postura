@@ -3,6 +3,20 @@ from enum import Enum
 from typing import Optional
 
 
+class TaintFlow(BaseModel):
+    """Evidence of a data-flow path from a taint source to a dangerous sink
+    detected within a single function body (intraprocedural)."""
+    function_qualified_name: str
+    source_param: str       # variable/param name carrying tainted data
+    source_type: str        # "request_param" | "function_param"
+    sink_call: str          # dangerous call text, e.g. "cursor.execute"
+    sink_type: str          # "sql_injection" | "command_injection" | "code_eval" | "path_traversal" | "ssrf"
+    sanitized: bool         # True if a sanitizer was detected before the sink
+    source_line: int        # line where taint was introduced (0 if unknown)
+    sink_line: int          # line of the sink call
+    file: str
+
+
 class ASTNode(BaseModel):
     name: str
     qualified_name: str
@@ -15,6 +29,7 @@ class ASTNode(BaseModel):
     parameters: list[str] = []
     return_type: Optional[str] = None
     docstring: Optional[str] = None
+    taint_sources: list[str] = []          # vars confirmed derived from HTTP request sources
 
 
 class CallEdge(BaseModel):
@@ -97,3 +112,5 @@ class StructuredIngestResult(BaseModel):
     # Maps relative file path → list of top-level package names imported in that file.
     # Used to create (Function)-[:USES]->(Dependency) edges.
     file_imports: dict[str, list[str]] = Field(default_factory=dict)
+    # Intraprocedural taint flows detected during AST parsing.
+    taint_flows: list[TaintFlow] = []

@@ -21,7 +21,7 @@ from typing import Optional
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser, Node
 
-from postura.models.ingest import ASTNode, CallEdge, DataAccessEvent
+from postura.models.ingest import ASTNode, CallEdge, DataAccessEvent, TaintFlow
 
 PY_LANGUAGE = Language(tspython.language())
 _parser = Parser(PY_LANGUAGE)
@@ -33,8 +33,8 @@ _parser = Parser(PY_LANGUAGE)
 
 def parse_file(
     file_path: str, repo_root: str = ""
-) -> tuple[list[ASTNode], list[CallEdge], list[DataAccessEvent], list[str]]:
-    """Parse a Python file and return (ast_nodes, call_edges, data_accesses, imported_packages)."""
+) -> tuple[list[ASTNode], list[CallEdge], list[DataAccessEvent], list[str], list[TaintFlow]]:
+    """Parse a Python file and return (ast_nodes, call_edges, data_accesses, imported_packages, taint_flows)."""
     path = Path(file_path)
     source_bytes = path.read_bytes()
     tree = _parser.parse(source_bytes)
@@ -44,7 +44,13 @@ def parse_file(
 
     collector = _FileCollector(source_bytes, rel_path, module)
     collector.visit(tree.root_node)
-    return collector.nodes, collector.call_edges, collector.data_accesses, collector.imports.top_level_packages()
+    return (
+        collector.nodes,
+        collector.call_edges,
+        collector.data_accesses,
+        collector.imports.top_level_packages(),
+        collector.taint_flows,
+    )
 
 
 def parse_directory(
@@ -56,7 +62,7 @@ def parse_directory(
     all_edges: list[CallEdge] = []
     all_accesses: list[DataAccessEvent] = []
     for py_file in Path(dir_path).rglob("*.py"):
-        nodes, edges, accesses, _pkgs = parse_file(str(py_file), root)
+        nodes, edges, accesses, _pkgs, _flows = parse_file(str(py_file), root)
         all_nodes.extend(nodes)
         all_edges.extend(edges)
         all_accesses.extend(accesses)
@@ -103,6 +109,207 @@ _PII_KEYWORDS = frozenset({
 
 def _is_pii_datastore(name: str) -> bool:
     return any(kw in name.lower() for kw in _PII_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
+# Taint analysis — sources, sinks, sanitizers
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a variable is sourced from an HTTP request
+_TAINT_SOURCE_PATTERN = re.compile(
+    r"request\.(args|form|json|data|values|files|get_json)\b",
+    re.IGNORECASE,
+)
+
+# Sanitizer functions that cleanse tainted data
+_SANITIZER_PATTERN = re.compile(
+    r"\b(escape|sanitize|quote|bleach\.clean|html\.escape|markupsafe|"
+    r"re\.escape|urllib\.parse\.quote|validators\.validate|"
+    r"filter|strip_tags|html\.unescape|parameterize)\b",
+    re.IGNORECASE,
+)
+
+# (pattern_matching_function_text, sink_type)
+_SINK_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bcursor\.execute|conn\.execute|connection\.execute|session\.execute\b", re.I),
+     "sql_injection"),
+    (re.compile(r"\bsubprocess\.(run|Popen|call|check_output|check_call)\b"), "command_injection"),
+    (re.compile(r"\bos\.(system|popen)\b"), "command_injection"),
+    (re.compile(r"^eval$"), "code_eval"),
+    (re.compile(r"^exec$"), "code_eval"),
+    (re.compile(r"^open$"), "path_traversal"),
+    (re.compile(r"\brequests\.(get|post|put|delete|patch|request|head)\b", re.I), "ssrf"),
+    (re.compile(r"\burllib\.(request\.)?urlopen\b|\burllib2\.urlopen\b", re.I), "ssrf"),
+    (re.compile(r"\bhttpx\.(get|post|put|delete|patch|request)\b", re.I), "ssrf"),
+]
+
+
+class _FuncTaintAnalyzer:
+    """Intraprocedural taint analysis for a single Python function body.
+
+    Treats all function parameters as potentially tainted (conservative) and
+    additionally confirms variables explicitly sourced from HTTP request objects.
+    Detects flows from tainted variables to dangerous sinks.
+    """
+
+    def __init__(self, parameters: list[str], source_bytes: bytes) -> None:
+        self._src = source_bytes
+        # All params start as potentially tainted (conservative)
+        self._tainted: set[str] = set(parameters)
+        # Variables confirmed as sourced from HTTP request objects
+        self._confirmed: set[str] = set()
+        # Line where each tainted var was first introduced
+        self._var_lines: dict[str, int] = {}
+        self.taint_flows: list[TaintFlow] = []
+        self.taint_sources_found: list[str] = []
+        self._qname: str = ""
+        self._ffile: str = ""
+
+    def analyze(self, func_qname: str, func_file: str, body_node: Node) -> None:
+        """Walk function body and collect taint flows."""
+        self._qname = func_qname
+        self._ffile = func_file
+        self._walk(body_node)
+
+    # ------------------------------------------------------------------
+    # Tree walk
+    # ------------------------------------------------------------------
+
+    def _walk(self, node: Node) -> None:
+        for child in node.children:
+            ctype = child.type
+            if ctype == "expression_statement":
+                # Handle assignments first (propagation), then scan sinks
+                for sub in child.children:
+                    if sub.type == "assignment":
+                        self._handle_assignment(sub)
+                    elif sub.type == "augmented_assignment":
+                        self._handle_aug_assignment(sub)
+                self._scan_sinks(child)
+            elif ctype == "assignment":
+                self._handle_assignment(child)
+                self._scan_sinks(child)
+            elif ctype == "augmented_assignment":
+                self._handle_aug_assignment(child)
+            elif ctype == "return_statement":
+                self._scan_sinks(child)
+            elif ctype in (
+                "if_statement", "elif_clause", "else_clause",
+                "while_statement", "for_statement",
+                "with_statement", "try_statement",
+                "except_clause", "finally_clause",
+                "block",
+            ):
+                self._walk(child)
+            # Skip: function_definition, class_definition, imports, comments
+
+    def _scan_sinks(self, node: Node) -> None:
+        """Recursively find call nodes and check if they are dangerous sinks."""
+        if node.type == "call":
+            self._detect_sink(node)
+        for child in node.children:
+            if child.type not in ("function_definition", "class_definition", "decorated_definition"):
+                self._scan_sinks(child)
+
+    # ------------------------------------------------------------------
+    # Assignment handlers
+    # ------------------------------------------------------------------
+
+    def _handle_assignment(self, node: Node) -> None:
+        lhs_node = node.child_by_field_name("left")
+        rhs_node = node.child_by_field_name("right")
+        if not lhs_node or not rhs_node:
+            return
+
+        lhs_text = _node_text(lhs_node, self._src).strip()
+        rhs_text = _node_text(rhs_node, self._src)
+        line = node.start_point[0] + 1
+
+        if _TAINT_SOURCE_PATTERN.search(rhs_text):
+            # Explicitly sourced from HTTP request — confirmed taint
+            self._tainted.add(lhs_text)
+            self._confirmed.add(lhs_text)
+            self._var_lines[lhs_text] = line
+            if lhs_text not in self.taint_sources_found:
+                self.taint_sources_found.append(lhs_text)
+        elif any(self._var_in_text(v, rhs_text) for v in self._tainted):
+            if _SANITIZER_PATTERN.search(rhs_text):
+                # Sanitizer applied — cleanse the taint
+                self._tainted.discard(lhs_text)
+            else:
+                # Propagate taint through the assignment
+                self._tainted.add(lhs_text)
+                earliest = min(
+                    (self._var_lines.get(v, 0) for v in self._tainted
+                     if self._var_in_text(v, rhs_text)),
+                    default=0,
+                )
+                self._var_lines[lhs_text] = earliest
+
+    def _handle_aug_assignment(self, node: Node) -> None:
+        lhs_node = node.child_by_field_name("left")
+        rhs_node = node.child_by_field_name("right")
+        if not lhs_node or not rhs_node:
+            return
+        lhs_text = _node_text(lhs_node, self._src).strip()
+        rhs_text = _node_text(rhs_node, self._src)
+        if any(self._var_in_text(v, rhs_text) for v in self._tainted):
+            self._tainted.add(lhs_text)
+
+    # ------------------------------------------------------------------
+    # Sink detection
+    # ------------------------------------------------------------------
+
+    def _detect_sink(self, call_node: Node) -> None:
+        func_node = call_node.child_by_field_name("function")
+        if not func_node:
+            return
+
+        call_text = _node_text(func_node, self._src)
+        args_node = call_node.child_by_field_name("arguments")
+        args_text = _node_text(args_node, self._src) if args_node else ""
+
+        sink_type: str | None = None
+        for pattern, stype in _SINK_PATTERNS:
+            if pattern.search(call_text):
+                sink_type = stype
+                break
+        if sink_type is None:
+            return
+
+        # Check if any tainted variable appears in arguments
+        tainted_arg = next(
+            (v for v in self._tainted if self._var_in_text(v, args_text)),
+            None,
+        )
+        if not tainted_arg:
+            return
+
+        sanitized = bool(_SANITIZER_PATTERN.search(args_text))
+        source_line = self._var_lines.get(tainted_arg, 0)
+        sink_line = call_node.start_point[0] + 1
+        source_type = "request_param" if tainted_arg in self._confirmed else "function_param"
+
+        self.taint_flows.append(TaintFlow(
+            function_qualified_name=self._qname,
+            source_param=tainted_arg,
+            source_type=source_type,
+            sink_call=call_text,
+            sink_type=sink_type,
+            sanitized=sanitized,
+            source_line=source_line,
+            sink_line=sink_line,
+            file=self._ffile,
+        ))
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _var_in_text(var: str, text: str) -> bool:
+        """Check if a variable name appears as a whole word in expression text."""
+        return bool(re.search(r"\b" + re.escape(var) + r"\b", text))
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +397,7 @@ class _FileCollector:
         self.nodes: list[ASTNode] = []
         self.call_edges: list[CallEdge] = []
         self.data_accesses: list[DataAccessEvent] = []
+        self.taint_flows: list[TaintFlow] = []
         self.imports = _ImportMap()
         self._class_stack: list[str] = []   # stack of qualified class names
         self._func_stack: list[str] = []    # stack of current function qualified names
@@ -336,6 +544,14 @@ class _FileCollector:
 
         node_type = "method" if self._class_stack else "function"
 
+        # Run taint analysis on the function body before creating the node
+        taint_sources: list[str] = []
+        if body:
+            analyzer = _FuncTaintAnalyzer(parameters, self.src)
+            analyzer.analyze(qualified_name, self.file, body)
+            taint_sources = analyzer.taint_sources_found
+            self.taint_flows.extend(analyzer.taint_flows)
+
         ast_node = ASTNode(
             name=name,
             qualified_name=qualified_name,
@@ -348,6 +564,7 @@ class _FileCollector:
             parameters=parameters,
             return_type=return_type,
             docstring=docstring,
+            taint_sources=taint_sources,
         )
         self.nodes.append(ast_node)
         self._local_funcs.add(qualified_name)
